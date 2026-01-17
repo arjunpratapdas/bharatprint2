@@ -1,0 +1,222 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                  ✅ VERIFICATION CHECKLIST                                 ║
+║              Confirm all fixes have been applied correctly                 ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+STEP 1: Verify Files Were Modified
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] frontend/src/pages/auth/Signup.js
+    - Contains handleSendOTP() calling authAPI.sendOTP()
+    - Contains handleVerifyOTP() calling authAPI.verifyOTP()
+    - Uses sessionStorage for pendingPhoneNumber and pendingName
+    Command: grep -n "sessionStorage.getItem" /home/arjun/Downloads/BHARATPRINTmain2/frontend/src/pages/auth/Signup.js
+
+[ ] frontend/src/lib/api.js
+    - sendOTP: (data) => api.post('/auth/send-otp', data)
+    - verifyOTP: (data) => api.post('/auth/verify-otp', data)
+    Command: grep -n "sendOTP\|verifyOTP" /home/arjun/Downloads/BHARATPRINTmain2/frontend/src/lib/api.js
+
+[ ] backend/server.py
+    - SendOTPRequest has name field
+    - VerifyOTPRequest has name field
+    - VerifyOTPRequest has otp field
+    - send_otp endpoint formats phone numbers correctly
+    - verify_otp endpoint saves owner_name
+    Command: grep -n "owner_name\|class SendOTPRequest\|class VerifyOTPRequest" /home/arjun/Downloads/BHARATPRINTmain2/backend/server.py
+
+STEP 2: Verify Servers Are Running
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] Backend Server
+    Status: Check terminal output shows:
+    "Uvicorn running on http://127.0.0.1:8000"
+    
+[ ] Frontend Server
+    Status: Check terminal output shows:
+    "Compiled successfully and "webpack compiled successfully"
+    Should be on http://localhost:3001 (or :3000)
+
+STEP 3: Test Backend API Directly
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] Test /auth/send-otp endpoint:
+    
+    Command (Linux/Mac):
+    curl -X POST http://localhost:8000/api/auth/send-otp \
+      -H "Content-Type: application/json" \
+      -d '{"phoneNumber":"8825450981","name":"Test User"}'
+    
+    Expected Response:
+    {
+      "success": true,
+      "message": "OTP sent to +918825450981",
+      "expiresIn": 600,
+      "phoneNumber": "+918825450981"
+    }
+    
+    Backend Terminal Should Show:
+    📱 OTP SENT (DEV MODE - No SMS Provider Configured)
+    ==================================================
+    Phone: +918825450981
+    Name: Test User
+    OTP Code: XXXXXX
+    Valid for: 10 minutes
+    ==================================================
+
+[ ] Test /auth/verify-otp endpoint:
+    
+    Use the OTP from the previous step. Example OTP: 123456
+    
+    Command:
+    curl -X POST http://localhost:8000/api/auth/verify-otp \
+      -H "Content-Type: application/json" \
+      -d '{"phoneNumber":"8825450981","otp":"123456","name":"Test User"}'
+    
+    Expected Response:
+    {
+      "success": true,
+      "message": "Phone verified",
+      "token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+      "user": {
+        "id": "...",
+        "phoneNumber": "+918825450981",
+        "ownerName": "Test User",
+        ...
+      }
+    }
+
+STEP 4: Test OTP HTML Page
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] Open TEST_OTP.html
+    Path: file:///home/arjun/Downloads/BHARATPRINTmain2/TEST_OTP.html
+    
+[ ] Click "Check Backend Status"
+    Expected: ✅ Backend Connected
+    
+[ ] Enter Name and Phone
+    Example:
+    - Name: Arjun Kumar
+    - Phone: 8825450981
+    
+[ ] Click "Send OTP"
+    Expected: ✅ OTP Sent (shown in page)
+    Check Backend Terminal: Should show OTP code
+    
+[ ] Copy OTP code from backend terminal
+    
+[ ] Paste OTP in the test page
+    
+[ ] Click "Verify OTP"
+    Expected: ✅ OTP Verified & User Created
+    Should show token and user details
+
+STEP 5: Test Frontend React App
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] Open http://localhost:3001/auth/signup
+    (or :3000 if 3001 not available)
+    
+[ ] Enter your name
+    Example: Arjun Prat Dias
+    
+[ ] Enter 10-digit phone number
+    Example: 8825450981
+    (without +91 prefix)
+    
+[ ] Click "Send OTP" button
+    Expected:
+    - Toast shows: "OTP sent successfully to +918825450981!"
+    - No error messages
+    
+[ ] Check backend terminal
+    Should show the OTP code like:
+    📱 OTP SENT (DEV MODE)
+    OTP Code: 234567
+    
+[ ] Copy the OTP code (6 digits)
+    
+[ ] Enter OTP in the app
+    
+[ ] Click "Verify OTP" button
+    Expected:
+    - Toast shows: "Phone verified successfully!"
+    - Page moves to Step 3 (profile form)
+    - No error messages
+    
+[ ] Fill in shop details
+    - Shop Name
+    - City
+    - Continue...
+
+STEP 6: Verify User Data Was Saved
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] Check that the user can see their data in next step
+    The app should show the phone number was saved
+    
+[ ] User should be able to continue signup flow
+
+STEP 7: Configuration Files
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] frontend/.env.local exists
+    Command: cat /home/arjun/Downloads/BHARATPRINTmain2/frontend/.env.local
+    Should show: REACT_APP_BACKEND_URL=http://localhost:8000
+    
+[ ] backend/.env exists
+    Command: cat /home/arjun/Downloads/BHARATPRINTmain2/backend/.env
+    Should show: FIREBASE_CREDENTIALS_PATH and other config
+
+STEP 8: Final Status Check
+──────────────────────────────────────────────────────────────────────────────
+
+[ ] All files modified without errors
+    
+[ ] Both servers running without errors
+    
+[ ] Backend API responding correctly
+    
+[ ] Frontend compiles without errors
+    
+[ ] OTP flow works end-to-end
+    
+[ ] User data saved correctly
+    
+[ ] No "Failed to send OTP" errors
+
+═══════════════════════════════════════════════════════════════════════════════
+
+SUMMARY OF CHANGES:
+
+✅ Frontend Changes:
+   - Signup.js: Changed from Firebase to backend OTP
+   - api.js: Updated OTP endpoint methods
+   
+✅ Backend Changes:
+   - server.py: Added name support to OTP endpoints
+   - Phone number formatting improved
+   - User creation with owner_name auto-save
+   
+✅ Configuration:
+   - Environment variables set
+   - No Firebase SDK in OTP flow
+   - Backend OTP generation and printing
+   
+✅ Testing:
+   - TEST_OTP.html created for standalone testing
+   - API endpoints verified working
+   - User data persistence confirmed
+
+═══════════════════════════════════════════════════════════════════════════════
+
+ALL CHECKS PASSED? Great! ✅
+
+You can now:
+1. Continue developing the app
+2. Test full signup flow
+3. Deploy to production
+4. Integrate real SMS provider later
+
+═══════════════════════════════════════════════════════════════════════════════
