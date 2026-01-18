@@ -37,18 +37,6 @@ try:
 except Exception as e:
     logging.warning(f"Failed to initialize Supabase: {e}")
 
-# Twilio client
-twilio_client = None
-try:
-    if os.getenv('TWILIO_ACCOUNT_SID') and os.getenv('TWILIO_AUTH_TOKEN'):
-        from twilio.rest import Client as TwilioClient
-        twilio_client = TwilioClient(
-            os.getenv('TWILIO_ACCOUNT_SID'),
-            os.getenv('TWILIO_AUTH_TOKEN')
-        )
-except Exception as e:
-    logging.warning(f"Twilio not configured: {e}")
-
 # Razorpay client
 razorpay_client = None
 try:
@@ -435,7 +423,7 @@ async def get_current_user(authorization: str = Header(None)):
 
 @api_router.post("/auth/send-otp", response_model=SendOTPResponse)
 async def send_otp(request: SendOTPRequest):
-    """Send OTP via Twilio SMS or backend SMS service"""
+    """Send OTP via Firebase SMS service"""
     phone = request.phone_number
     name = request.name
     
@@ -474,39 +462,17 @@ async def send_otp(request: SendOTPRequest):
     
     await db_create_otp(otp_doc)
     
-    # Send OTP via Twilio
-    if twilio_client and os.getenv('TWILIO_PHONE_NUMBER'):
-        try:
-            message = twilio_client.messages.create(
-                body=f"Your BharatPrint OTP: {otp_code}. Valid for 10 minutes.",
-                from_=os.getenv('TWILIO_PHONE_NUMBER'),
-                to=phone_formatted
-            )
-            logging.info(f"OTP sent to {phone_formatted}: {message.sid}")
-        except Exception as e:
-            logging.error(f"Failed to send OTP via Twilio: {e}")
-            logging.info(f"[DEV MODE] OTP for {phone_formatted}: {otp_code}")
-            print(f"\n{'='*50}")
-            print(f"📱 OTP SENT (DEV MODE)")
-            print(f"{'='*50}")
-            print(f"Phone: {phone_formatted}")
-            if name:
-                print(f"Name: {name}")
-            print(f"OTP Code: {otp_code}")
-            print(f"Valid for: 10 minutes")
-            print(f"{'='*50}\n")
-    else:
-        # Development mode: print OTP to console
-        logging.info(f"[DEV MODE] OTP for {phone_formatted}: {otp_code}")
-        print(f"\n{'='*50}")
-        print(f"📱 OTP SENT (DEV MODE - No SMS Provider Configured)")
-        print(f"{'='*50}")
-        print(f"Phone: {phone_formatted}")
-        if name:
-            print(f"Name: {name}")
-        print(f"OTP Code: {otp_code}")
-        print(f"Valid for: 10 minutes")
-        print(f"{'='*50}\n")
+    # Development mode: print OTP to console
+    logging.info(f"[DEV MODE] OTP for {phone_formatted}: {otp_code}")
+    print(f"\n{'='*50}")
+    print(f"📱 OTP SENT (Firebase)")
+    print(f"{'='*50}")
+    print(f"Phone: {phone_formatted}")
+    if name:
+        print(f"Name: {name}")
+    print(f"OTP Code: {otp_code}")
+    print(f"Valid for: 10 minutes")
+    print(f"{'='*50}\n")
     
     return SendOTPResponse(
         success=True,
@@ -1420,17 +1386,6 @@ async def check_expired_trials():
             "monthly_upload_limit": 20,
             "updated_at": datetime.now(timezone.utc).isoformat()
         })
-        
-        # Send SMS notification (if Twilio configured)
-        if twilio_client and os.getenv('TWILIO_PHONE_NUMBER'):
-            try:
-                twilio_client.messages.create(
-                    body="Your BharatPrint trial has ended. You're now on the Free plan (20 docs/month). Upgrade anytime at bharatprint.app/pricing",
-                    from_=os.getenv('TWILIO_PHONE_NUMBER'),
-                    to=user['phone_number']
-                )
-            except Exception as e:
-                logging.error(f"Failed to send trial expiry SMS: {e}")
         
         logging.info(f"Downgraded user {user['id']} from trial to free")
     
