@@ -83,8 +83,23 @@ JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-this-in-production'
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 30
 
+# Setup lifespan
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logging.info("BharatPrint API starting up...")
+    if supabase_client:
+        logging.info("Connected to Supabase")
+    else:
+        logging.warning("Running with mock database - configure Supabase for production")
+    yield
+    # Shutdown
+    logging.info("BharatPrint API shutting down...")
+
 # Create the main app
-app = FastAPI(title="BharatPrint API")
+app = FastAPI(title="BharatPrint API", lifespan=lifespan)
 api_router = APIRouter(prefix="/api")
 
 # In-memory mock database for development when Supabase is not configured
@@ -98,11 +113,9 @@ mock_db = {
 # ==================== MODELS ====================
 
 class SendOTPRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     phone_number: str = Field(alias="phoneNumber")
     name: Optional[str] = None
-    
-    class Config:
-        populate_by_name = True
 
 class SendOTPResponse(BaseModel):
     success: bool
@@ -112,13 +125,11 @@ class SendOTPResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 class VerifyOTPRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     phone_number: Optional[str] = Field(None, alias="phoneNumber")
     otp_code: Optional[str] = Field(None, alias="otpCode")
     otp: Optional[str] = None  # Alternative field name from frontend
     name: Optional[str] = None
-    
-    class Config:
-        populate_by_name = True
     
     def get_phone_number(self):
         return self.phone_number
@@ -130,12 +141,6 @@ class VerifyOTPFirebaseRequest(BaseModel):
     id_token: str = Field(alias="idToken")
     name: str
     phone_number: str = Field(alias="phoneNumber")
-    model_config = ConfigDict(populate_by_name=True)
-
-class VerifyClerkTokenRequest(BaseModel):
-    phone_number: str = Field(alias="phoneNumber")
-    name: Optional[str] = None
-    clerk_user_id: str = Field(alias="clerkUserId")
     model_config = ConfigDict(populate_by_name=True)
 
 class UserProfile(BaseModel):
@@ -824,97 +829,6 @@ async def verify_firebase_token(request: VerifyOTPFirebaseRequest):
         user=user_profile
     )
 
-@api_router.post("/auth/verify-clerk-token", response_model=VerifyOTPResponse)
-async def verify_clerk_token(request: VerifyClerkTokenRequest):
-    """Verify Clerk session and return JWT token"""
-    phone = request.phone_number
-    clerk_user_id = request.clerk_user_id
-    name = request.name or ""
-    
-    # Format phone number
-    phone_digits = ''.join(c for c in phone if c.isdigit())
-    if len(phone_digits) == 10:
-        phone_formatted = f"+91{phone_digits}"
-    else:
-        phone_formatted = phone if phone.startswith('+91') else f"+91{phone}"
-    
-    logging.info(f"🔧 Clerk verification started for phone: {phone_formatted}, Clerk UID: {clerk_user_id}")
-    
-    # Validate Clerk user ID format
-    if not clerk_user_id or not isinstance(clerk_user_id, str):
-        logging.error("❌ Invalid Clerk user ID")
-        raise HTTPException(status_code=400, detail="Invalid Clerk user ID")
-    
-    # Find or create user
-    user = await db_get_user_by_phone(phone_formatted)
-    
-    is_new_user = False
-    if not user:
-        is_new_user = True
-        user_id = str(uuid.uuid4())
-        referral_code = generate_referral_code(phone_formatted)
-        
-        user = {
-            "id": user_id,
-            "phone_number": phone_formatted,
-            "owner_name": name,
-            "phone_verified": True,
-            "clerk_user_id": clerk_user_id,
-            "shop_name": "",
-            "city": "",
-            "state": "Assam",
-            "pincode": None,
-            "business_category": "print_shop",
-            "referral_code": referral_code,
-            "documents_uploaded": 0,
-            "subscription_status": "free",
-            "monthly_upload_limit": 20,
-            "uploads_used_this_month": 0,
-            "onboarding_completed": False,
-            "trial_started_at": None,
-            "trial_ends_at": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db_create_user(user)
-        logging.info(f"✅ New user created with Clerk UID: {clerk_user_id}")
-    else:
-        # Update existing user
-        await db_update_user(user['id'], {
-            "last_login": datetime.now(timezone.utc).isoformat(),
-            "owner_name": name or user.get('owner_name', ''),
-            "clerk_user_id": clerk_user_id
-        })
-        logging.info(f"✅ Existing user updated: {user['id']}")
-    
-    # Generate JWT token
-    token = create_jwt_token(user['id'], phone_formatted)
-    
-    # Build user profile
-    user_profile = UserProfile(
-        id=user['id'],
-        phoneNumber=user['phone_number'],
-        shopName=user.get('shop_name', ''),
-        city=user.get('city', ''),
-        state=user.get('state', 'Assam'),
-        pincode=user.get('pincode'),
-        referralCode=user['referral_code'],
-        onboardingCompleted=user.get('onboarding_completed', False),
-        subscriptionStatus=user.get('subscription_status', 'free'),
-        monthlyUploadLimit=user.get('monthly_upload_limit', 20),
-        uploadsUsedThisMonth=user.get('uploads_used_this_month', 0),
-        trialEndsAt=user.get('trial_ends_at')
-    )
-    
-    logging.info(f"✅ Clerk token verification successful for user: {user['id']}")
-    
-    return VerifyOTPResponse(
-        success=True,
-        token=token,
-        isNewUser=is_new_user,
-        user=user_profile
-    )
-
 @api_router.post("/auth/register")
 async def register_user(request: RegisterRequest, current_user: dict = Depends(get_current_user)):
     """Complete user profile during onboarding"""
@@ -1545,6 +1459,32 @@ async def get_my_referral_code(current_user: dict = Depends(get_current_user)):
         }
     }
 
+# ==================== HEALTH & STATUS ENDPOINTS ====================
+
+@app.get("/health", tags=["Status"])
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "service": "BharatPrint API",
+        "version": "1.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@app.get("/", tags=["Status"])
+async def root():
+    """Welcome endpoint"""
+    return {
+        "message": "Welcome to BharatPrint API",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Suppress favicon.ico 404 errors"""
+    return {"detail": "Not Found"}, 204
+
 # ==================== INCLUDE ROUTER & MIDDLEWARE ====================
 
 app.include_router(api_router)
@@ -1562,14 +1502,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("BharatPrint API starting up...")
-    if supabase_client:
-        logger.info("Connected to Supabase")
-    else:
-        logger.warning("Running with mock database - configure Supabase for production")
 
 if __name__ == "__main__":
     import uvicorn

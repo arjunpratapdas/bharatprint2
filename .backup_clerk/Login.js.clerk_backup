@@ -10,6 +10,14 @@ import Logo from '../../components/Logo';
 const Login = () => {
   const navigate = useNavigate();
   const { setAuth } = useAuthStore();
+  const { signIn, setActive } = useSignIn();
+  
+  // Log initialization
+  useEffect(() => {
+    console.log('Login component mounted');
+    console.log('Clerk signIn object:', signIn);
+    console.log('Clerk setActive object:', setActive);
+  }, [signIn, setActive]);
   
   const [step, setStep] = useState(1);
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -17,7 +25,6 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState('');
-  let confirmationResult = null;
 
   // Handle OTP input
   const handleOtpChange = (e, index) => {
@@ -45,9 +52,8 @@ const Login = () => {
     
     // Validate phone number
     if (!phoneNumber || phoneNumber.length !== 10) {
-      const msg = 'Please enter a valid 10-digit phone number';
-      toast.error(msg);
-      setError(msg);
+      toast.error('Please enter a valid 10-digit phone number');
+      setError('Please enter a valid 10-digit phone number');
       return;
     }
 
@@ -55,19 +61,22 @@ const Login = () => {
     setError('');
     
     try {
-      console.log('📱 Firebase Phone Auth: Sending OTP', { phoneNumber });
+      logAuthStep('🔥', 'Clerk Phone Authentication: Sending OTP', { phoneNumber });
       
       // Format phone with +91 country code
-      const formattedPhone = `+91${phoneNumber}`;
-      console.log('📱 Formatted phone number:', formattedPhone);
+      const formattedPhone = formatPhoneNumber(phoneNumber);
+      logAuthStep('📱', 'Formatted phone number', { formattedPhone });
       
-      // Create reCAPTCHA verifier
-      const verifier = createRecaptchaVerifier();
-      
-      // Send OTP
-      confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-      
-      console.log('✅ OTP sent successfully via Firebase');
+      if (!signIn) {
+        throw new Error('Clerk SignIn not initialized');
+      }
+
+      // Create phone number identifier sign in flow
+      const result = await signIn.create({
+        identifier: formattedPhone
+      });
+
+      logAuthStep('✅', 'OTP sent successfully', { result });
       
       // Store phone for verification
       sessionStorage.setItem('loginPhoneNumber', phoneNumber);
@@ -88,23 +97,17 @@ const Login = () => {
       }, 1000);
 
     } catch (err) {
-      console.error('❌ OTP Send Error:', err);
+      logAuthStep('❌', 'OTP Send Error', err);
       
-      let errorMessage = 'Failed to send OTP. Please try again.';
-      
-      if (err.code === 'auth/invalid-phone-number') {
-        errorMessage = 'Invalid phone number. Please enter a valid 10-digit number.';
-      } else if (err.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many attempts. Please try again later.';
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
+      const errorMessage = getErrorMessage(err);
       setError(errorMessage);
       toast.error(errorMessage);
-      resetRecaptchaVerifier();
       
-      console.error('Full error:', err);
+      console.error('Full error object:', err);
+      console.error('Error code:', err?.code);
+      console.error('Error message:', err?.message);
+      console.error('Error stack:', err?.stack);
+      console.error('Error details:', JSON.stringify(err, null, 2));
     } finally {
       setLoading(false);
     }
@@ -115,9 +118,8 @@ const Login = () => {
     
     const otpCode = otp.join('');
     if (!otpCode || otpCode.length !== 6) {
-      const msg = 'Please enter a 6-digit code';
-      toast.error(msg);
-      setError(msg);
+      toast.error('Please enter a 6-digit code');
+      setError('Please enter a 6-digit code');
       return;
     }
 
@@ -125,62 +127,69 @@ const Login = () => {
     setError('');
 
     try {
-      console.log('📝 Verifying OTP code...');
+      logAuthStep('📝', 'Verifying OTP code', { otpCode: '****' });
       
-      if (!confirmationResult) {
-        throw new Error('Confirmation result not found. Please request OTP again.');
+      if (!signIn) {
+        throw new Error('Clerk SignIn not initialized');
       }
 
-      // Verify OTP
-      const result = await confirmationResult.confirm(otpCode);
-      
-      console.log('✅ OTP verified successfully via Firebase');
-      console.log('Firebase user:', result.user);
-      
-      // Get Firebase ID token
-      const idToken = await result.user.getIdToken();
-      
-      // Verify with backend
-      try {
-        const response = await authAPI.post('/auth/verify-firebase-token', { 
-          idToken: idToken
-        });
+      // Prepare the phone code attempt
+      const verificationResult = await signIn.attemptFirstFactor({
+        strategy: 'phone_code',
+        code: otpCode
+      });
 
-        console.log('✅ Backend verified token');
+      logAuthStep('✅', 'OTP verified successfully', { verificationResult });
+      
+      if (verificationResult.status === 'complete') {
+        // Set active session
+        await setActive({ session: verificationResult.createdSessionId });
+        logAuthStep('✅', 'Clerk session created', { sessionId: verificationResult.createdSessionId });
+
+        // Get the session token
+        const session = verificationResult;
         
-        const { user, jwt_token } = response.data;
+        logAuthStep('🔑', 'Retrieved session', { sessionId: session.createdSessionId });
         
-        // Store auth data
-        setAuth({
-          user,
-          token: jwt_token
-        });
-        
-        localStorage.setItem('auth_token', jwt_token);
-        sessionStorage.removeItem('loginPhoneNumber');
-        
-        toast.success('Login successful!');
-        navigate('/dashboard');
-      } catch (backendError) {
-        console.error('❌ Backend verification failed:', backendError);
-        
-        const errorMsg = backendError.response?.data?.detail || 'Backend verification failed';
-        setError(errorMsg);
-        toast.error(errorMsg);
+        // Verify with backend
+        try {
+          const response = await authAPI.post('/auth/verify-clerk-token', { 
+            phoneNumber: phoneNumber,
+            clerkUserId: session.userId
+          });
+
+          logAuthStep('✅', 'Backend verified token', response.data);
+          
+          const { user, jwt_token } = response.data;
+          
+          // Store auth data
+          setAuth({
+            user,
+            token: jwt_token
+          });
+          
+          localStorage.setItem('auth_token', jwt_token);
+          sessionStorage.removeItem('loginPhoneNumber');
+          
+          toast.success('Login successful!');
+          navigate('/dashboard');
+        } catch (backendError) {
+          logAuthStep('❌', 'Backend verification failed', backendError);
+          
+          const errorMsg = backendError.response?.data?.detail || 
+                         'Backend verification failed';
+          setError(errorMsg);
+          toast.error(errorMsg);
+        }
+      } else {
+        logAuthStep('⚠️', 'OTP verification incomplete', { status: verificationResult.status });
+        setError('OTP verification failed');
+        toast.error('OTP verification failed. Please try again.');
       }
     } catch (err) {
-      console.error('❌ OTP Verification Error:', err);
+      logAuthStep('❌', 'OTP Verification Error', err);
       
-      let errorMessage = 'Invalid OTP. Please try again.';
-      
-      if (err.code === 'auth/invalid-verification-code') {
-        errorMessage = 'Invalid verification code. Please try again.';
-      } else if (err.code === 'auth/code-expired') {
-        errorMessage = 'Verification code has expired. Please request a new OTP.';
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
+      const errorMessage = getErrorMessage(err);
       setError(errorMessage);
       toast.error(errorMessage);
       
@@ -198,6 +207,18 @@ const Login = () => {
     const minutes = Math.floor(countdown / 60);
     const seconds = countdown % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const handleOTPChange = (index, value) => {
+    if (isNaN(value)) return;
+    const newOTP = [...otp];
+    newOTP[index] = value;
+    setOtp(newOTP);
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      document.getElementById(`otp-${index + 1}`)?.focus();
+    }
   };
 
   const handleResendOTP = () => {
@@ -320,7 +341,7 @@ const Login = () => {
                       type="text"
                       maxLength="1"
                       value={digit}
-                      onChange={(e) => handleOtpChange(e, index)}
+                      onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(e, index)}
                       disabled={loading}
                       className="w-14 h-14 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-[#34BEE8] focus:border-transparent dark:bg-gray-700 dark:text-white outline-none"
@@ -376,9 +397,6 @@ const Login = () => {
           </div>
         </div>
       </div>
-
-      {/* reCAPTCHA Container */}
-      <div id="recaptcha-container"></div>
     </div>
   );
 };
