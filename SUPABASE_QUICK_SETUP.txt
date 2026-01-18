@@ -1,0 +1,175 @@
+================================================================================
+                    SUPABASE QUICK SETUP - 3 MINUTES
+================================================================================
+
+✅ COMPLETED:
+   • Supabase credentials added to backend/.env
+   • Backend can connect to Supabase
+   • Backend and Frontend both running
+   • Firebase SMS-OTP ready for Indian numbers
+
+⏳ PENDING: Create database tables
+
+================================================================================
+                          STEP-BY-STEP GUIDE
+================================================================================
+
+STEP 1: Open Supabase Dashboard
+   → Go to: https://app.supabase.com
+   → Login with your account
+
+STEP 2: Select Your Project
+   → Project name: bharatprint-b388f
+   → Click on it
+
+STEP 3: Open SQL Editor
+   → Left sidebar → SQL Editor
+   → Click "New Query" button
+
+STEP 4: Copy the Schema
+   → Open file: backend/schema.sql
+   → Select All (Ctrl+A or Cmd+A)
+   → Copy (Ctrl+C or Cmd+C)
+
+STEP 5: Paste into SQL Editor
+   → Click in Supabase SQL Editor
+   → Paste (Ctrl+V or Cmd+V)
+   → You should see the entire schema
+
+STEP 6: Execute the SQL
+   → Click the "Run" button (top right)
+   → Or press Ctrl+Enter
+   → Wait for "Query successful" message
+
+STEP 7: Verify Tables Created
+   → Left sidebar → Table Editor
+   → You should see 4 tables:
+      ✓ users
+      ✓ otps
+      ✓ documents
+      ✓ audit_logs
+
+================================================================================
+                          WHAT EACH TABLE STORES
+================================================================================
+
+TABLE: users
+   • User profiles and account info
+   • Phone numbers
+   • Referral codes
+   • Subscription status
+
+TABLE: otps
+   • One-Time Passwords sent via SMS
+   • Expiration times
+   • Verification status
+
+TABLE: documents
+   • Uploaded documents
+   • File metadata
+   • Share links
+   • Sharing permissions
+
+TABLE: audit_logs
+   • All system activity
+   • User actions
+   • Security events
+
+================================================================================
+                              AFTER SETUP
+================================================================================
+
+TESTING THE SMS-OTP FLOW:
+
+1. Go to: http://localhost:3000/auth/login
+
+2. Enter phone number: 
+   • Any 10-digit Indian number
+   • Example: 9876543210
+
+3. Click "Send OTP"
+   • Check backend terminal (port 8001)
+   • OTP code will be printed there
+
+4. Enter the 6-digit OTP code
+
+5. Click "Verify OTP"
+   • Should redirect to dashboard
+   • User is now registered in Supabase
+
+6. Check Supabase:
+   • Go to https://app.supabase.com
+   • Table Editor → users table
+   • You should see your new user
+
+================================================================================
+                           CREDENTIALS INFO
+================================================================================
+
+These are already in backend/.env (no need to add manually):
+
+SUPABASE_URL: https://pnrsdfkivemwgajpssdz.supabase.co
+SUPABASE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+⚠️  IMPORTANT:
+   • Never share these keys
+   • Never commit to git (already in .gitignore)
+   • Keep .env file secure
+
+================================================================================
+                            TROUBLESHOOTING
+================================================================================
+
+Problem: "Table not found" errors
+Solution: Ensure you ran the SQL schema in Supabase SQL Editor
+
+Problem: "Connection refused" from backend
+Solution: Check that backend is running: http://localhost:8001/health
+
+Problem: Cannot see the tables in Supabase
+Solution: Refresh the page or click on "Table Editor" again
+
+Problem: OTP not showing in terminal
+Solution: Check that backend is running in debug mode
+
+Problem: SMS not received in real phone
+Solution: In dev, OTP prints to console. It's not actually sent in dev mode.
+         For production, configure your Firebase project for SMS delivery.
+
+================================================================================
+                          QUICK LINKS
+================================================================================
+
+Supabase Dashboard:     https://app.supabase.com
+Firebase Console:      https://console.firebase.google.com
+Backend Health:        http://localhost:8001/health
+Frontend App:          http://localhost:3000
+Login Page:            http://localhost:3000/auth/login
+
+================================================================================
+                       TIME ESTIMATE
+================================================================================
+
+Copy schema to Supabase: 1 minute
+Run SQL query:          30 seconds
+Verify tables created:  30 seconds
+Test SMS-OTP flow:      1 minute
+
+TOTAL TIME: ~3 minutes
+
+================================================================================
+                         YOU'RE ALL SET!
+================================================================================
+
+All credentials are in place. Just create the database tables and you're done!
+
+Questions? Check:
+   • SUPABASE_SETUP_COMPLETE.md - Full setup guide
+   • SUPABASE_INTEGRATION_REPORT.md - Detailed report
+   • SMS_OTP_FIREBASE_LOCATIONS.md - Code locations
+
+Need to verify everything is working?
+   Run: python3 verify_supabase.py
+
+================================================================================
