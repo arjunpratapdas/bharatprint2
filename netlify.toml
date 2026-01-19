@@ -3,11 +3,11 @@
 [build]
   base = "frontend"
   command = "npm run build"
-  publish = "frontend/build"
+  publish = "build"
 
 [build.environment]
-  # Ensure proper Node.js version
-  NODE_VERSION = "18.17.0"
+  # Ensure proper Node.js version (Firebase AI requires >=20)
+  NODE_VERSION = "20"
   CI = "false"
   SKIP_PREFLIGHT_CHECK = "true"
   
