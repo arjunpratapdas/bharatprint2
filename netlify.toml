@@ -1,18 +1,18 @@
 # Netlify Configuration for BharatPrint Frontend
 
 [build]
-base = "frontend"
-command = "npm run build"
-publish = "frontend/build"
+  base = "frontend"
+  command = "npm run build"
+  publish = "frontend/build"
 
 [build.environment]
-# React environment
-REACT_APP_BACKEND_URL = "https://bharatprint-backend.onrender.com"
-CI = "false"
-SKIP_PREFLIGHT_CHECK = "true"
-
-# Ensure proper Node.js version
-NODE_VERSION = "18.17.0"
+  # Ensure proper Node.js version
+  NODE_VERSION = "18.17.0"
+  CI = "false"
+  SKIP_PREFLIGHT_CHECK = "true"
+  
+# Note: Set REACT_APP_BACKEND_URL in Netlify UI under Site settings > Environment variables
+# for security and flexibility across environments
 
 [[redirects]]
 from = "/*"
