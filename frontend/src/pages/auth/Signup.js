@@ -108,7 +108,8 @@ const Signup = () => {
       // Network error - backend not reachable
       if (!err.response) {
         if (err.code === 'ECONNREFUSED' || err.message?.includes('Network Error') || err.message?.includes('Failed to fetch')) {
-          errorMessage = 'Cannot connect to server. Please make sure the backend is running on http://localhost:8000';
+          const backendUrl = process.env.REACT_APP_BACKEND_URL || '(REACT_APP_BACKEND_URL not set)';
+          errorMessage = `Cannot connect to server. Backend URL: ${backendUrl}. If deployed on Netlify, set REACT_APP_BACKEND_URL to your Render URL (e.g. https://bharatprint2.onrender.com) and redeploy.`;
         } else if (err.code === 'ERR_NETWORK' || err.request) {
           errorMessage = 'Network error. Please check your internet connection and try again.';
         } else {
