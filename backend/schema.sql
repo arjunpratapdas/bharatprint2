@@ -37,11 +37,13 @@ CREATE INDEX IF NOT EXISTS idx_users_subscription ON users(subscription_status);
 CREATE TABLE IF NOT EXISTS otps (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     phone_number VARCHAR(15) NOT NULL,
+    otp_code VARCHAR(10), -- For development/debugging only
     otp_hash VARCHAR(255) NOT NULL,
     attempts INTEGER DEFAULT 0,
     sent_at TIMESTAMPTZ DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
     verified_at TIMESTAMPTZ,
+    message_sid VARCHAR(50), -- Twilio message tracking ID
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

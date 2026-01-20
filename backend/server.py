@@ -37,6 +37,32 @@ try:
 except Exception as e:
     logging.warning(f"Failed to initialize Supabase: {e}")
 
+# Twilio SMS Configuration
+twilio_client = None
+TWILIO_PHONE_NUMBER = None
+TWILIO_VERIFIED_NUMBERS = []
+try:
+    TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+    TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+    TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
+    verified_numbers_str = os.getenv('TWILIO_VERIFIED_NUMBERS', '')
+    
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
+        from twilio.rest import Client as TwilioClient
+        twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        
+        # Parse verified numbers
+        if verified_numbers_str:
+            TWILIO_VERIFIED_NUMBERS = [num.strip() for num in verified_numbers_str.split(',')]
+        
+        logging.info(f"✅ Twilio SMS client initialized successfully")
+        logging.info(f"📱 Twilio Phone: {TWILIO_PHONE_NUMBER}")
+        logging.info(f"✓ Verified Numbers: {len(TWILIO_VERIFIED_NUMBERS)} numbers")
+    else:
+        logging.warning("⚠️ Twilio credentials not configured - SMS OTP will not work")
+except Exception as e:
+    logging.error(f"❌ Failed to initialize Twilio: {e}")
+
 # Razorpay client
 razorpay_client = None
 try:
@@ -50,22 +76,6 @@ try:
 except Exception as e:
     logging.warning(f"Razorpay not configured: {e}")
 
-# Firebase Admin SDK
-firebase_app = None
-try:
-    import firebase_admin
-    from firebase_admin import credentials, auth as firebase_auth
-    
-    firebase_credentials_path = os.getenv('FIREBASE_CREDENTIALS_PATH', None)
-    if firebase_credentials_path and os.path.exists(firebase_credentials_path):
-        cred = credentials.Certificate(firebase_credentials_path)
-        firebase_app = firebase_admin.initialize_app(cred)
-        logging.info("Firebase Admin SDK initialized successfully")
-    else:
-        logging.warning("Firebase credentials not configured")
-except Exception as e:
-    logging.warning(f"Firebase Admin SDK not configured: {e}")
-
 # JWT Configuration
 JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-this-in-production')
 JWT_ALGORITHM = 'HS256'
@@ -77,14 +87,28 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logging.info("BharatPrint API starting up...")
+    logging.info("="*60)
+    logging.info("🚀 BharatPrint API starting up...")
+    logging.info("="*60)
+    
     if supabase_client:
-        logging.info("Connected to Supabase")
+        logging.info("✅ Connected to Supabase")
     else:
-        logging.warning("Running with mock database - configure Supabase for production")
+        logging.warning("⚠️ Running with mock database - configure Supabase for production")
+    
+    if twilio_client:
+        logging.info(f"✅ Twilio SMS OTP enabled")
+        logging.info(f"   📱 From: {TWILIO_PHONE_NUMBER}")
+        logging.info(f"   ✓ Verified: {len(TWILIO_VERIFIED_NUMBERS)} numbers")
+    else:
+        logging.warning("⚠️ Twilio SMS not configured - OTP will not work")
+    
+    logging.info("="*60)
+    
     yield
+    
     # Shutdown
-    logging.info("BharatPrint API shutting down...")
+    logging.info("👋 BharatPrint API shutting down...")
 
 # Create the main app
 app = FastAPI(title="BharatPrint API", lifespan=lifespan)
@@ -125,11 +149,6 @@ class VerifyOTPRequest(BaseModel):
     def get_otp_code(self):
         return self.otp_code or self.otp
 
-class VerifyOTPFirebaseRequest(BaseModel):
-    id_token: str = Field(alias="idToken")
-    name: str
-    phone_number: str = Field(alias="phoneNumber")
-    model_config = ConfigDict(populate_by_name=True)
 
 class UserProfile(BaseModel):
     id: str
@@ -210,81 +229,129 @@ def generate_qr_code(data: str) -> str:
 async def db_get_user_by_phone(phone: str):
     """Get user by phone number"""
     if supabase_client:
-        result = supabase_client.table('users').select('*').eq('phone_number', phone).execute()
-        return result.data[0] if result.data else None
-    else:
-        # Mock database
+        try:
+            result = supabase_client.table('users').select('*').eq('phone_number', phone).execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase user query failed: {e}")
+    
+    # Fall back to mock_db
+    if "users" in mock_db:
         for user in mock_db["users"]:
             if user.get("phone_number") == phone:
                 return user
-        return None
+    return None
 
 async def db_get_user_by_id(user_id: str):
     """Get user by ID"""
     if supabase_client:
-        result = supabase_client.table('users').select('*').eq('id', user_id).execute()
-        return result.data[0] if result.data else None
-    else:
+        try:
+            result = supabase_client.table('users').select('*').eq('id', user_id).execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase user query failed: {e}")
+    
+    # Fall back to mock_db
+    if "users" in mock_db:
         for user in mock_db["users"]:
             if user.get("id") == user_id:
                 return user
-        return None
+    return None
 
 async def db_get_user_by_merchant_code(merchant_code: str):
     """Get user by merchant/referral code"""
     if supabase_client:
-        result = supabase_client.table('users').select('*').eq('referral_code', merchant_code).execute()
-        return result.data[0] if result.data else None
-    else:
+        try:
+            result = supabase_client.table('users').select('*').eq('referral_code', merchant_code).execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase user query failed: {e}")
+    
+    # Fall back to mock_db
+    if "users" in mock_db:
         for user in mock_db["users"]:
             if user.get("referral_code") == merchant_code:
                 return user
-        return None
+    return None
 
 async def db_create_user(user_data: dict):
     """Create new user"""
     if supabase_client:
-        result = supabase_client.table('users').insert(user_data).execute()
-        return result.data[0] if result.data else None
-    else:
-        mock_db["users"].append(user_data)
-        return user_data
+        try:
+            result = supabase_client.table('users').insert(user_data).execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase user insert failed: {e}")
+    
+    # Fall back to mock_db
+    if "users" not in mock_db:
+        mock_db["users"] = []
+    mock_db["users"].append(user_data)
+    return user_data
 
 async def db_update_user(user_id: str, update_data: dict):
     """Update user"""
     if supabase_client:
-        result = supabase_client.table('users').update(update_data).eq('id', user_id).execute()
-        return result.data[0] if result.data else None
-    else:
+        try:
+            result = supabase_client.table('users').update(update_data).eq('id', user_id).execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase user update failed: {e}")
+    
+    # Fall back to mock_db
+    if "users" in mock_db:
         for i, user in enumerate(mock_db["users"]):
             if user.get("id") == user_id:
                 mock_db["users"][i].update(update_data)
                 return mock_db["users"][i]
-        return None
+    return None
 
 async def db_create_otp(otp_data: dict):
     """Store OTP record"""
     if supabase_client:
-        result = supabase_client.table('otps').insert(otp_data).execute()
-        return result.data[0] if result.data else None
+        try:
+            result = supabase_client.table('otps').insert(otp_data).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logging.error(f"Supabase OTP insert failed: {e}")
+            # Fall back to mock_db
+            if "otps" not in mock_db:
+                mock_db["otps"] = []
+            mock_db["otps"].append(otp_data)
+            return otp_data
     else:
+        if "otps" not in mock_db:
+            mock_db["otps"] = []
         mock_db["otps"].append(otp_data)
         return otp_data
 
 async def db_get_latest_otp(phone: str):
     """Get latest valid OTP for phone"""
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Try Supabase first
     if supabase_client:
-        result = supabase_client.table('otps')\
-            .select('*')\
-            .eq('phone_number', phone)\
-            .gt('expires_at', now)\
-            .is_('verified_at', 'null')\
-            .order('sent_at', desc=True)\
-            .limit(1)\
-            .execute()
-        return result.data[0] if result.data else None
-    else:
+        try:
+            result = supabase_client.table('otps')\
+                .select('*')\
+                .eq('phone_number', phone)\
+                .gt('expires_at', now)\
+                .is_('verified_at', 'null')\
+                .order('sent_at', desc=True)\
+                .limit(1)\
+                .execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase OTP query failed: {e}")
+    
+    # Fall back to mock_db (or if Supabase failed)
+    if "otps" in mock_db:
         valid_otps = [
             otp for otp in mock_db["otps"]
             if otp.get("phone_number") == phone
@@ -292,18 +359,27 @@ async def db_get_latest_otp(phone: str):
             and otp.get("verified_at") is None
         ]
         return valid_otps[-1] if valid_otps else None
+    
+    return None
 
 async def db_update_otp(otp_id: str, update_data: dict):
     """Update OTP record"""
     if supabase_client:
-        result = supabase_client.table('otps').update(update_data).eq('id', otp_id).execute()
-        return result.data[0] if result.data else None
-    else:
+        try:
+            result = supabase_client.table('otps').update(update_data).eq('id', otp_id).execute()
+            if result.data:
+                return result.data[0]
+        except Exception as e:
+            logging.error(f"Supabase OTP update failed: {e}")
+    
+    # Fall back to mock_db (or if Supabase failed)
+    if "otps" in mock_db:
         for i, otp in enumerate(mock_db["otps"]):
             if otp.get("id") == otp_id:
                 mock_db["otps"][i].update(update_data)
                 return mock_db["otps"][i]
-        return None
+    
+    return None
 
 async def db_create_document(doc_data: dict):
     """Create document record"""
@@ -423,7 +499,7 @@ async def get_current_user(authorization: str = Header(None)):
 
 @api_router.post("/auth/send-otp", response_model=SendOTPResponse)
 async def send_otp(request: SendOTPRequest):
-    """Send OTP via Firebase SMS service"""
+    """Send OTP via Twilio SMS service"""
     phone = request.phone_number
     name = request.name
     
@@ -431,53 +507,132 @@ async def send_otp(request: SendOTPRequest):
     if not phone:
         raise HTTPException(status_code=400, detail="Phone number is required")
     
-    # Remove any non-digit characters except +
+    # Remove all non-digit characters (spaces, dashes, etc.)
     phone_digits = ''.join(c for c in phone if c.isdigit())
     
-    # Check length
+    # Check length and format consistently
     if len(phone_digits) == 10:
-        # Indian phone number without country code
+        # Indian phone number without country code - add +91
         phone_formatted = f"+91{phone_digits}"
-    elif len(phone_digits) == 12 and phone.startswith('+91'):
-        # Already formatted
-        phone_formatted = phone
-    else:
+    elif len(phone_digits) == 12 and phone_digits.startswith('91'):
+        # Already has country code (91) - add + prefix
+        phone_formatted = f"+{phone_digits}"
+    elif len(phone_digits) == 11 and phone_digits.startswith('91'):
+        # Has country code but missing one digit - invalid
         raise HTTPException(status_code=400, detail="Invalid phone number. Please enter a valid 10-digit Indian mobile number.")
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid phone number format. Expected 10 digits, got {len(phone_digits)} digits. Please enter a valid 10-digit Indian mobile number.")
+    
+    # Check if Twilio is configured
+    if not twilio_client:
+        logging.error("❌ Twilio client not initialized - check environment variables")
+        raise HTTPException(
+            status_code=500, 
+            detail="SMS service not configured. Please contact support."
+        )
+    
+    if not TWILIO_PHONE_NUMBER:
+        logging.error("❌ Twilio phone number not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="SMS service phone number not configured. Please contact support."
+        )
+    
+    # TRIAL ACCOUNT CHECK: Verify phone number is in verified list
+    if TWILIO_VERIFIED_NUMBERS and phone_formatted not in TWILIO_VERIFIED_NUMBERS:
+        logging.warning(f"⚠️ Unverified number attempted: {phone_formatted}")
+        logging.warning(f"⚠️ Verified numbers: {TWILIO_VERIFIED_NUMBERS}")
+        raise HTTPException(
+            status_code=403,
+            detail=f"This phone number ({phone_formatted}) is not verified for trial account. Please use a verified number or verify {phone_formatted} in Twilio Console first."
+        )
     
     # Generate OTP
     otp_code = generate_otp()
     otp_hash = hash_password(otp_code)
     
-    # Store OTP in database
+    # Send SMS via Twilio
+    try:
+        logging.info(f"📤 Attempting to send SMS to {phone_formatted} via Twilio...")
+        message = twilio_client.messages.create(
+            body=f"Your BharatPrint verification code is: {otp_code}\n\nValid for 5 minutes.\n\nDo not share this code with anyone.",
+            from_=TWILIO_PHONE_NUMBER,
+            to=phone_formatted
+        )
+        
+        logging.info(f"✅ SMS sent successfully via Twilio")
+        logging.info(f"📱 To: {phone_formatted}")
+        logging.info(f"📨 Message SID: {message.sid}")
+        logging.info(f"📊 Status: {message.status}")
+        
+    except Exception as e:
+        error_message = str(e)
+        logging.error(f"❌ Twilio SMS failed: {error_message}")
+        logging.error(f"❌ Error type: {type(e).__name__}")
+        
+        # Check for common Twilio errors
+        error_lower = error_message.lower()
+        if "not a valid phone number" in error_lower or "invalid" in error_lower:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid phone number format: {phone_formatted}. Please enter a valid 10-digit Indian mobile number."
+            )
+        elif "unverified" in error_lower or "not verified" in error_lower:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Phone number {phone_formatted} must be verified in Twilio Console for trial accounts. Please verify the number or use a different verified number."
+            )
+        elif "authentication" in error_lower or "credentials" in error_lower or "unauthorized" in error_lower:
+            raise HTTPException(
+                status_code=500,
+                detail="SMS service authentication failed. Please contact support."
+            )
+        elif "network" in error_lower or "connection" in error_lower or "timeout" in error_lower:
+            raise HTTPException(
+                status_code=503,
+                detail="SMS service temporarily unavailable. Please try again in a few moments."
+            )
+        else:
+            # Generic error - include the actual error message for debugging
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to send SMS: {error_message}. Please try again or contact support."
+            )
+    
+    # Store OTP in database (5-minute expiration as per Twilio best practices)
     otp_doc = {
         "id": str(uuid.uuid4()),
         "phone_number": phone_formatted,
-        "otp_code": otp_code,  # Remove in production - for dev only
+        "otp_code": otp_code,  # For dev/debugging
         "otp_hash": otp_hash,
         "attempts": 0,
         "sent_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
-        "verified_at": None
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "verified_at": None,
+        "message_sid": message.sid  # Twilio tracking
     }
     
+    # Store OTP (will use Supabase or fallback to memory automatically)
     await db_create_otp(otp_doc)
+    logging.info(f"✅ OTP stored successfully")
     
     # Development mode: print OTP to console
     logging.info(f"[DEV MODE] OTP for {phone_formatted}: {otp_code}")
     print(f"\n{'='*50}")
-    print(f"📱 OTP SENT (Firebase)")
+    print(f"📱 OTP SENT via Twilio SMS")
     print(f"{'='*50}")
     print(f"Phone: {phone_formatted}")
     if name:
         print(f"Name: {name}")
     print(f"OTP Code: {otp_code}")
-    print(f"Valid for: 10 minutes")
+    print(f"Valid for: 5 minutes")
+    print(f"Message SID: {message.sid}")
     print(f"{'='*50}\n")
     
     return SendOTPResponse(
         success=True,
-        message=f"OTP sent to {phone_formatted}",
-        expiresIn=600,
+        message=f"OTP sent to {phone_formatted} via SMS",
+        expiresIn=300,  # 5 minutes = 300 seconds
         phoneNumber=phone_formatted
     )
 
@@ -496,18 +651,18 @@ async def verify_otp(request: VerifyOTPRequest):
     if not phone:
         raise HTTPException(status_code=400, detail="Phone number is required")
     
-    # Remove any non-digit characters except +
+    # Remove all non-digit characters (spaces, dashes, etc.)
     phone_digits = ''.join(c for c in phone if c.isdigit())
     
     # Format consistently
     if len(phone_digits) == 10:
-        # Indian phone number without country code
+        # Indian phone number without country code - add +91
         phone_formatted = f"+91{phone_digits}"
-    elif len(phone_digits) == 12 and phone.startswith('+91'):
-        # Already formatted
-        phone_formatted = phone
+    elif len(phone_digits) == 12 and phone_digits.startswith('91'):
+        # Already has country code (91) - add + prefix
+        phone_formatted = f"+{phone_digits}"
     else:
-        raise HTTPException(status_code=400, detail="Invalid phone number format. Please enter a valid 10-digit Indian mobile number.")
+        raise HTTPException(status_code=400, detail=f"Invalid phone number format. Expected 10 digits, got {len(phone_digits)} digits. Please enter a valid 10-digit Indian mobile number.")
     
     logging.info(f"Verifying OTP for phone: {phone_formatted}, OTP: {otp_code}")
     
@@ -599,201 +754,6 @@ async def verify_otp(request: VerifyOTPRequest):
         user=user_profile
     )
 
-@api_router.post("/auth/verify-otp-firebase", response_model=VerifyOTPResponse)
-async def verify_otp_firebase(request: VerifyOTPFirebaseRequest):
-    """Verify Firebase OTP and return JWT token"""
-    phone = request.phone_number
-    id_token = request.id_token
-    name = request.name
-    
-    # Verify Firebase token
-    try:
-        if not firebase_app:
-            raise HTTPException(status_code=500, detail="Firebase not configured")
-        
-        from firebase_admin import auth as firebase_auth
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        firebase_uid = decoded_token.get('uid')
-        
-        # Extract phone from decoded token
-        firebase_phone = decoded_token.get('phone_number')
-        if not firebase_phone or not firebase_phone.endswith(phone[-10:]):
-            raise HTTPException(status_code=400, detail="Phone number mismatch")
-        
-    except Exception as e:
-        logging.error(f"Firebase token verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid Firebase token")
-    
-    # Find or create user
-    user = await db_get_user_by_phone(phone)
-    
-    is_new_user = False
-    if not user:
-        is_new_user = True
-        user_id = str(uuid.uuid4())
-        referral_code = generate_referral_code(phone)
-        
-        user = {
-            "id": user_id,
-            "phone_number": phone,
-            "owner_name": name,
-            "phone_verified": True,
-            "shop_name": "",
-            "city": "",
-            "state": "Assam",
-            "pincode": None,
-            "business_category": "print_shop",
-            "referral_code": referral_code,
-            "documents_uploaded": 0,
-            "subscription_status": "free",
-            "monthly_upload_limit": 20,
-            "uploads_used_this_month": 0,
-            "onboarding_completed": False,
-            "trial_started_at": None,
-            "trial_ends_at": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db_create_user(user)
-    else:
-        await db_update_user(user['id'], {
-            "last_login": datetime.now(timezone.utc).isoformat(),
-            "owner_name": name
-        })
-    
-    # Generate JWT token
-    token = create_jwt_token(user['id'], phone)
-    
-    # Build user profile
-    user_profile = UserProfile(
-        id=user['id'],
-        phoneNumber=user['phone_number'],
-        shopName=user.get('shop_name', ''),
-        city=user.get('city', ''),
-        state=user.get('state', 'Assam'),
-        pincode=user.get('pincode'),
-        referralCode=user['referral_code'],
-        onboardingCompleted=user.get('onboarding_completed', False),
-        subscriptionStatus=user.get('subscription_status', 'free'),
-        monthlyUploadLimit=user.get('monthly_upload_limit', 20),
-        uploadsUsedThisMonth=user.get('uploads_used_this_month', 0),
-        trialEndsAt=user.get('trial_ends_at')
-    )
-    
-    return VerifyOTPResponse(
-        success=True,
-        token=token,
-        isNewUser=is_new_user,
-        user=user_profile
-    )
-
-@api_router.post("/auth/verify-firebase-token", response_model=VerifyOTPResponse)
-async def verify_firebase_token(request: VerifyOTPFirebaseRequest):
-    """Verify Firebase ID token and create/return user"""
-    phone = request.phone_number
-    id_token = request.id_token
-    name = request.name
-    
-    # Format phone number
-    phone_digits = ''.join(c for c in phone if c.isdigit())
-    if len(phone_digits) == 10:
-        phone_formatted = f"+91{phone_digits}"
-    else:
-        phone_formatted = phone if phone.startswith('+91') else f"+91{phone}"
-    
-    # Verify Firebase token
-    try:
-        if not firebase_app:
-            logging.error("Firebase not configured")
-            raise HTTPException(status_code=500, detail="Firebase not configured")
-        
-        from firebase_admin import auth as firebase_auth
-        
-        # Verify the ID token
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        firebase_uid = decoded_token.get('uid')
-        firebase_phone = decoded_token.get('phone_number')
-        
-        logging.info(f"✅ Firebase token verified for UID: {firebase_uid}, Phone: {firebase_phone}")
-        
-        # Verify phone number matches
-        if not firebase_phone or not firebase_phone.endswith(phone_digits):
-            logging.error(f"Phone number mismatch: Firebase={firebase_phone}, Requested={phone_formatted}")
-            raise HTTPException(status_code=400, detail="Phone number mismatch")
-        
-    except Exception as e:
-        logging.error(f"❌ Firebase token verification failed: {str(e)}")
-        if "Firebase not configured" in str(e):
-            raise HTTPException(status_code=500, detail="Firebase not configured")
-        raise HTTPException(status_code=401, detail=f"Invalid Firebase token: {str(e)}")
-    
-    # Find or create user
-    user = await db_get_user_by_phone(phone_formatted)
-    
-    is_new_user = False
-    if not user:
-        is_new_user = True
-        user_id = str(uuid.uuid4())
-        referral_code = generate_referral_code(phone_formatted)
-        
-        user = {
-            "id": user_id,
-            "phone_number": phone_formatted,
-            "owner_name": name or "",
-            "phone_verified": True,
-            "firebase_uid": firebase_uid,
-            "shop_name": "",
-            "city": "",
-            "state": "Assam",
-            "pincode": None,
-            "business_category": "print_shop",
-            "referral_code": referral_code,
-            "documents_uploaded": 0,
-            "subscription_status": "free",
-            "monthly_upload_limit": 20,
-            "uploads_used_this_month": 0,
-            "onboarding_completed": False,
-            "trial_started_at": None,
-            "trial_ends_at": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db_create_user(user)
-        logging.info(f"✅ New user created with Firebase UID: {firebase_uid}")
-    else:
-        # Update existing user
-        await db_update_user(user['id'], {
-            "last_login": datetime.now(timezone.utc).isoformat(),
-            "owner_name": name or user.get('owner_name', ''),
-            "firebase_uid": firebase_uid
-        })
-        logging.info(f"✅ Existing user updated: {user['id']}")
-    
-    # Generate JWT token
-    token = create_jwt_token(user['id'], phone_formatted)
-    
-    # Build user profile
-    user_profile = UserProfile(
-        id=user['id'],
-        phoneNumber=user['phone_number'],
-        shopName=user.get('shop_name', ''),
-        city=user.get('city', ''),
-        state=user.get('state', 'Assam'),
-        pincode=user.get('pincode'),
-        referralCode=user['referral_code'],
-        onboardingCompleted=user.get('onboarding_completed', False),
-        subscriptionStatus=user.get('subscription_status', 'free'),
-        monthlyUploadLimit=user.get('monthly_upload_limit', 20),
-        uploadsUsedThisMonth=user.get('uploads_used_this_month', 0),
-        trialEndsAt=user.get('trial_ends_at')
-    )
-    
-    return VerifyOTPResponse(
-        success=True,
-        token=token,
-        isNewUser=is_new_user,
-        user=user_profile
-    )
 
 @api_router.post("/auth/register")
 async def register_user(request: RegisterRequest, current_user: dict = Depends(get_current_user)):
@@ -1460,4 +1420,4 @@ logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

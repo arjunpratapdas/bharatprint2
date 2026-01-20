@@ -6,7 +6,7 @@
   publish = "build"
 
 [build.environment]
-  # Ensure proper Node.js version (Firebase AI requires >=20)
+  # Node.js version 20 for modern React features
   NODE_VERSION = "20"
   CI = "false"
   SKIP_PREFLIGHT_CHECK = "true"

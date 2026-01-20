@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { auth, signInWithPhoneNumber, createRecaptchaVerifier, resetRecaptchaVerifier } from '../../lib/firebase';
 import { authAPI } from '../../lib/api';
 import useAuthStore from '../../store/authStore';
 import { toast } from 'sonner';
@@ -17,7 +16,6 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState('');
-  let confirmationResult = null;
 
   // Handle OTP input
   const handleOtpChange = (e, index) => {
@@ -55,26 +53,39 @@ const Login = () => {
     setError('');
     
     try {
-      console.log('📱 Firebase Phone Auth: Sending OTP', { phoneNumber });
+      console.log('📱 Twilio SMS: Sending OTP', { phoneNumber });
+      
+      // Clean phone number - remove any spaces or non-digits
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      
+      if (cleanPhone.length !== 10) {
+        const msg = 'Please enter a valid 10-digit phone number';
+        toast.error(msg);
+        setError(msg);
+        setLoading(false);
+        return;
+      }
       
       // Format phone with +91 country code
-      const formattedPhone = `+91${phoneNumber}`;
+      const formattedPhone = `+91${cleanPhone}`;
       console.log('📱 Formatted phone number:', formattedPhone);
       
-      // Create reCAPTCHA verifier
-      const verifier = createRecaptchaVerifier();
+      // Call backend API to send OTP via Twilio
+      const response = await authAPI.sendOTP({
+        phoneNumber: formattedPhone
+      });
       
-      // Send OTP
-      confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-      
-      console.log('✅ OTP sent successfully via Firebase');
+      console.log('✅ OTP sent successfully:', response.data);
       
       // Store phone for verification
-      sessionStorage.setItem('loginPhoneNumber', phoneNumber);
+      sessionStorage.setItem('loginPhoneNumber', formattedPhone);
       
-      toast.success(`OTP sent to ${formattedPhone}`);
+      toast.success(response.data.message || `OTP sent to ${formattedPhone}`);
       setStep(2);
-      setCountdown(300); // 5 minutes for OTP verification
+      
+      // Set countdown from response (300 seconds = 5 minutes)
+      const expiresIn = response.data.expiresIn || 300;
+      setCountdown(expiresIn);
       
       // Start countdown timer
       const timer = setInterval(() => {
@@ -89,22 +100,41 @@ const Login = () => {
 
     } catch (err) {
       console.error('❌ OTP Send Error:', err);
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response,
+        code: err.code,
+        request: err.request
+      });
       
       let errorMessage = 'Failed to send OTP. Please try again.';
       
-      if (err.code === 'auth/invalid-phone-number') {
-        errorMessage = 'Invalid phone number. Please enter a valid 10-digit number.';
-      } else if (err.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many attempts. Please try again later.';
-      } else if (err.message) {
-        errorMessage = err.message;
+      // Network error - backend not reachable
+      if (!err.response) {
+        if (err.code === 'ECONNREFUSED' || err.message?.includes('Network Error') || err.message?.includes('Failed to fetch')) {
+          errorMessage = 'Cannot connect to server. Please make sure the backend is running on http://localhost:8000';
+        } else if (err.code === 'ERR_NETWORK' || err.request) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        } else {
+          errorMessage = `Connection error: ${err.message || 'Please check if the backend server is running.'}`;
+        }
+      }
+      // Backend responded with error
+      else if (err.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err.response?.status === 403) {
+        errorMessage = 'This phone number is not verified. Please use a verified number for testing.';
+      } else if (err.response?.status === 400) {
+        errorMessage = err.response.data?.detail || 'Invalid phone number format. Please enter a valid 10-digit number.';
+      } else if (err.response?.status === 500 || err.response?.status === 503) {
+        errorMessage = err.response.data?.detail || 'SMS service error. Please try again or contact support.';
+      } else if (err.response?.status) {
+        errorMessage = `Error ${err.response.status}: ${err.response.data?.detail || err.response.statusText || 'Please try again.'}`;
       }
       
       setError(errorMessage);
       toast.error(errorMessage);
-      resetRecaptchaVerifier();
-      
-      console.error('Full error:', err);
+      console.error('Full error object:', err);
     } finally {
       setLoading(false);
     }
@@ -121,64 +151,50 @@ const Login = () => {
       return;
     }
 
+    const phoneNum = sessionStorage.getItem('loginPhoneNumber');
+    if (!phoneNum) {
+      toast.error('Please request OTP first');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
-      console.log('📝 Verifying OTP code...');
+      console.log('📝 Verifying OTP code...', { phoneNumber: phoneNum, otpCode });
       
-      if (!confirmationResult) {
-        throw new Error('Confirmation result not found. Please request OTP again.');
-      }
-
-      // Verify OTP
-      const result = await confirmationResult.confirm(otpCode);
+      // Call backend API to verify OTP
+      const response = await authAPI.verifyOTP({
+        phoneNumber: phoneNum,
+        otpCode: otpCode
+      });
       
-      console.log('✅ OTP verified successfully via Firebase');
-      console.log('Firebase user:', result.user);
+      console.log('✅ OTP verified successfully:', response.data);
       
-      // Get Firebase ID token
-      const idToken = await result.user.getIdToken();
+      const { token, user } = response.data;
       
-      // Verify with backend
-      try {
-        const response = await authAPI.post('/auth/verify-firebase-token', { 
-          idToken: idToken
-        });
-
-        console.log('✅ Backend verified token');
-        
-        const { user, jwt_token } = response.data;
-        
-        // Store auth data
-        setAuth({
-          user,
-          token: jwt_token
-        });
-        
-        localStorage.setItem('auth_token', jwt_token);
-        sessionStorage.removeItem('loginPhoneNumber');
-        
-        toast.success('Login successful!');
-        navigate('/dashboard');
-      } catch (backendError) {
-        console.error('❌ Backend verification failed:', backendError);
-        
-        const errorMsg = backendError.response?.data?.detail || 'Backend verification failed';
-        setError(errorMsg);
-        toast.error(errorMsg);
-      }
+      // Store auth data
+      setAuth({
+        user,
+        token
+      });
+      
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.removeItem('loginPhoneNumber');
+      
+      toast.success('Login successful!');
+      navigate('/dashboard');
+      
     } catch (err) {
       console.error('❌ OTP Verification Error:', err);
       
       let errorMessage = 'Invalid OTP. Please try again.';
       
-      if (err.code === 'auth/invalid-verification-code') {
-        errorMessage = 'Invalid verification code. Please try again.';
-      } else if (err.code === 'auth/code-expired') {
-        errorMessage = 'Verification code has expired. Please request a new OTP.';
-      } else if (err.message) {
-        errorMessage = err.message;
+      if (err.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err.response?.status === 400) {
+        errorMessage = 'Invalid or expired OTP. Please try again.';
       }
       
       setError(errorMessage);
@@ -258,13 +274,16 @@ const Login = () => {
                     type="tel"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                    placeholder="9876543210"
+                    placeholder="8822545981"
                     maxLength="10"
                     disabled={loading}
                     className="w-full pl-24 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#34BEE8] focus:border-transparent dark:bg-gray-700 dark:text-white outline-none"
                     data-testid="phone-input"
                   />
                 </div>
+                <p className="mt-2 text-xs text-[#626C71]">
+                  Testing: Use 7086230642 or 8822545981 (verified numbers)
+                </p>
               </div>
 
               <button
@@ -343,7 +362,9 @@ const Login = () => {
                     </button>
                   )}
                 </div>
-                <p className="text-sm text-[#626C71] mt-2">Sent to +91 {phoneNumber}</p>
+                <p className="text-sm text-[#626C71] mt-2">
+                  Sent to {sessionStorage.getItem('loginPhoneNumber')}
+                </p>
               </div>
 
               <button
@@ -376,9 +397,6 @@ const Login = () => {
           </div>
         </div>
       </div>
-
-      {/* reCAPTCHA Container */}
-      <div id="recaptcha-container"></div>
     </div>
   );
 };

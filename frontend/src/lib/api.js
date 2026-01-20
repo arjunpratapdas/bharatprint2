@@ -7,6 +7,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // 30 seconds timeout
 });
 
 // Add auth token to requests
@@ -42,7 +43,6 @@ export default api;
 export const authAPI = {
   sendOTP: (data) => api.post('/auth/send-otp', data),
   verifyOTP: (data) => api.post('/auth/verify-otp', data),
-  verifyFirebaseToken: (data) => api.post('/auth/verify-firebase-token', data),
   register: (data) => api.post('/auth/register', data),
 };
 
