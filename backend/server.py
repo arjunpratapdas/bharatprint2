@@ -1404,10 +1404,27 @@ async def favicon():
 
 app.include_router(api_router)
 
+def _parse_cors_origins(raw: str) -> list[str]:
+    """
+    Parse CORS_ORIGINS env var into a normalized list.
+    - Trims whitespace
+    - Removes trailing slashes so `https://x/` matches browser origin `https://x`
+    """
+    if not raw:
+        return ["*"]
+    parts = [p.strip() for p in raw.split(",")]
+    parts = [p.rstrip("/") for p in parts if p]
+    return parts or ["*"]
+
+
+_cors_origins = _parse_cors_origins(os.environ.get("CORS_ORIGINS", "*"))
+_allow_all = len(_cors_origins) == 1 and _cors_origins[0] == "*"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    # If allow_origins is "*", Starlette disallows allow_credentials=True.
+    allow_credentials=(False if _allow_all else True),
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
